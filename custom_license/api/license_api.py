@@ -121,14 +121,14 @@ def send_sales_order_confirmation(sales_order_name):
         <div class="email-container">
             <div class="header">
                 <img src="https://www.arrivalnet.se/site/wp-content/uploads/2020/03/Arrivalnet-logo-large-with-text-480x125.png" alt="ArrivalNet Logo" />
-                <h2>{sales_order.customer_name}</h2>
+
             </div>
 
             <p><strong>Thank you for your purchase!</strong></p>
             <p><strong>Customer Purchase Order:</strong> {sales_order.po_no or 'N/A'}</p>
             <p><strong>Sales Order Number:</strong> {sales_order.name}</p>
             <p><strong>Order Date:</strong> {sales_order.transaction_date.strftime('%Y-%m-%d')}</p>
-            <p>Here is your license keys:</p>
+            <p>Here are your license keys:</p>
 
             <table class="license-table">
                 <colgroup>
