@@ -35,7 +35,7 @@ def send_sales_order_confirmation(sales_order_name):
                 license_info_rows += f"""
                 <tr>
                     <td>{item.item_code}</td>
-                    <td>{item.item_description}</td>
+                    <td>{item.description}</td>
                     <td>1</td>
                     <td>{serial_number}</td>
                 </tr>
