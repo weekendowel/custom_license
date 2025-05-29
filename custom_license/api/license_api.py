@@ -1,5 +1,7 @@
 import frappe
 import requests
+from frappe.utils.pdf import get_pdf
+from frappe.utils.file_manager import save_file
 
 @frappe.whitelist()
 def send_sales_order_confirmation(sales_order_name):
@@ -23,19 +25,19 @@ def send_sales_order_confirmation(sales_order_name):
             quantity = int(item.qty)
 
             for i in range(quantity):
-                api_url = f"https://www.arrivalnet.se/php_scripts/get_new_license.php?item_code={item.item_code}&customer={contact_email}"
+                api_url = f"http://192.168.2.2:9002/createnew?partcode={item.item_code}&purchaseorder={sales_order.name}"
                 frappe.logger().info(f"Fetching license for item {item.item_code} (license {i+1} of {quantity}) from {api_url}")
-                response = requests.get(api_url, timeout=10)
+                response = requests.post(api_url, timeout=10)
                 response.raise_for_status()
 
-                license_key = response.json().get('license_key', 'NO_LICENSE_RECEIVED')
-
+                license_key = response.json().get('LicenseKey', 'NO_LICENSE_RECEIVED')
+                serial_number = response.json().get('SerialNumber', 'NO_SERIAL_NUMBER')
                 license_info_rows += f"""
                 <tr>
                     <td>{item.item_code}</td>
                     <td>{item.item_name}</td>
                     <td>1</td>
-                    <td>{sales_order.name}</td>
+                    <td>{serial_number}</td>
                 </tr>
                 <tr>
                     <td></td>
@@ -116,7 +118,7 @@ def send_sales_order_confirmation(sales_order_name):
                 <p><strong>Customer Purchase Order:</strong> {sales_order.po_no or 'N/A'}</p>
                 <p><strong>Sales Order Number:</strong> {sales_order.name}</p>
                 <p><strong>Order Date:</strong> {sales_order.transaction_date.strftime('%Y-%m-%d')}</p>
-                <p>Here is your order confirmation and license keys:</p>
+                <p>Here is your license keys:</p>
 
 
                 <table class="license-table">
@@ -139,12 +141,30 @@ def send_sales_order_confirmation(sales_order_name):
         </html>
         """
 
+        pdf_file = get_pdf(html_content)
+        filename = f"License_Confirmation_{sales_order.name}.pdf"
+
+        # Attach file to Sales Order and get file URL
+        file_doc = save_file(filename, pdf_file, "Sales Order", sales_order.name, is_private=0)
+
+        file_doc = save_file(
+        filename,
+        pdf_file,
+        "Sales Order",
+        sales_order.name,
+        is_private=0
+        )
+
         frappe.sendmail(
             recipients=[contact_email],
-            subject="Your License Keys from ArrivalNet",
+            subject=f"Your License Keys from ArrivalNet on order {sales_order.po_no or sales_order.name} ",
             message=html_content,
-            delayed=False
+            delayed=False,
+            bcc=["order@arrivalnet.se"],
+            attachments=[{
+                "fname": filename,
+                "fcontent": pdf_file
+            }]
         )
     else:
         frappe.throw("No license documents could be generated.")
-
