@@ -26,7 +26,7 @@ def send_sales_order_confirmation(sales_order_name):
             quantity = int(item.qty)
 
             for i in range(quantity):
-                api_url = f"http://192.168.2.2:9002/createnew?partcode={item.item_code}&purchaseorder={sales_order.name}"
+                api_url = f"http://192.168.2.2:9002/createnew?partcode={item.item_code}&purchaseorder={sales_order.name}_{i}"
                 frappe.logger().info(f"Fetching license for item {item.item_code} (license {i+1} of {quantity}) from {api_url}")
                 response = requests.post(api_url, timeout=10)
                 response.raise_for_status()
