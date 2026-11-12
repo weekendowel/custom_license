@@ -1,9 +1,31 @@
 import frappe
 import requests
-from decimal import Decimal, InvalidOperation
-from html import escape
+import re
+
+from decimal import Decimal
+from html import escape, unescape
+from frappe.utils import strip_html_tags
 from frappe.utils.pdf import get_pdf
 from frappe.utils.file_manager import save_file
+
+
+def clean_description(value):
+    """Convert a Frappe rich-text description to readable plain text."""
+    text = str(value or "")
+
+    # Preserve a space where HTML block elements end.
+    text = re.sub(
+        r"<\s*br\s*/?\s*>|</\s*(?:p|div|li|tr|h[1-6])\s*>",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    text = strip_html_tags(text)
+    text = unescape(text)
+
+    # Collapse whitespace and line breaks for use inside the table cell.
+    return " ".join(text.split())
 
 
 @frappe.whitelist()
@@ -19,7 +41,9 @@ def send_sales_order_confirmation(sales_order_name):
                 break
 
     if not contact_email:
-        frappe.throw("No contact email found for the customer linked to this Sales Order.")
+        frappe.throw(
+            "No contact email found for the customer linked to this Sales Order."
+        )
 
     license_info_rows = []
     generation_errors = []
@@ -27,8 +51,13 @@ def send_sales_order_confirmation(sales_order_name):
     for item in sales_order.items:
         try:
             quantity_decimal = Decimal(str(item.qty))
-            if quantity_decimal <= 0 or quantity_decimal != quantity_decimal.to_integral_value():
-                raise ValueError(f"License quantity must be a positive whole number (got {item.qty}).")
+            if (
+                quantity_decimal <= 0
+                or quantity_decimal != quantity_decimal.to_integral_value()
+            ):
+                raise ValueError(
+                    f"License quantity must be a positive whole number (got {item.qty})."
+                )
             quantity = int(quantity_decimal)
 
             # A stable row-specific reference makes retries idempotent while allowing
@@ -40,10 +69,12 @@ def send_sales_order_confirmation(sales_order_name):
                 "purchaseOrder": purchase_order_reference,
                 "amount": quantity,
             }
+
             frappe.logger().info(
                 f"Requesting one license for item {item.item_code}, quantity {quantity}, "
                 f"order row {item.name}."
             )
+
             response = requests.post(api_url, params=params, timeout=15)
             response.raise_for_status()
 
@@ -54,15 +85,20 @@ def send_sales_order_confirmation(sales_order_name):
 
             if not license_key:
                 raise ValueError("The license service returned no license key.")
+
             if issued_amount != quantity:
                 raise ValueError(
-                    f"The license service returned Amount={issued_amount}, but the Sales Order row has quantity {quantity}."
+                    f"The license service returned Amount={issued_amount}, "
+                    f"but the Sales Order row has quantity {quantity}."
                 )
 
-            license_info_rows.append(f"""
+            description = clean_description(item.description)
+
+            license_info_rows.append(
+                f"""
                 <tr>
                     <td>{escape(str(item.item_code or ""))}</td>
-                    <td>{escape(str(item.description or ""))}</td>
+                    <td>{escape(description)}</td>
                     <td>{quantity}</td>
                     <td>{escape(str(serial_number or "NO_SERIAL_NUMBER"))}</td>
                 </tr>
@@ -71,16 +107,24 @@ def send_sales_order_confirmation(sales_order_name):
                     <td>Online activation</td>
                     <td colspan="2"><strong>{escape(str(license_key))}</strong></td>
                 </tr>
-            """)
+                """
+            )
 
         except Exception as exc:
-            frappe.log_error(frappe.get_traceback(), f"License generation failed for {item.item_code}")
-            generation_errors.append(f"{item.item_code} (order row {item.name}): {exc}")
+            frappe.log_error(
+                frappe.get_traceback(),
+                f"License generation failed for {item.item_code}",
+            )
+            generation_errors.append(
+                f"{item.item_code} (order row {item.name}): {exc}"
+            )
 
     # Do not email a partial confirmation. Successfully generated keys use the
     # stable row reference above, so retrying this function will retrieve those keys.
     if generation_errors:
-        frappe.throw("License generation failed:\n" + "\n".join(generation_errors))
+        frappe.throw(
+            "License generation failed:\n" + "\n".join(generation_errors)
+        )
 
     if not license_info_rows:
         frappe.throw("No license documents could be generated.")
@@ -112,9 +156,9 @@ def send_sales_order_confirmation(sales_order_name):
                 <img src="https://www.arrivalnet.se/site/wp-content/uploads/2020/03/Arrivalnet-logo-large-with-text-480x125.png" alt="ArrivalNet Logo" />
             </div>
             <p><strong>Thank you for your purchase!</strong></p>
-            <p><strong>Customer Purchase Order:</strong> {escape(str(sales_order.po_no or 'N/A'))}</p>
+            <p><strong>Customer Purchase Order:</strong> {escape(str(sales_order.po_no or "N/A"))}</p>
             <p><strong>Sales Order Number:</strong> {escape(str(sales_order.name))}</p>
-            <p><strong>Order Date:</strong> {sales_order.transaction_date.strftime('%Y-%m-%d')}</p>
+            <p><strong>Order Date:</strong> {sales_order.transaction_date.strftime("%Y-%m-%d")}</p>
             <p>Here are your license keys:</p>
             <table class="license-table">
                 <colgroup>
@@ -129,7 +173,7 @@ def send_sales_order_confirmation(sales_order_name):
                     <th>Amount</th>
                     <th>Serial number</th>
                 </tr>
-                {''.join(license_info_rows)}
+                {"".join(license_info_rows)}
             </table>
             <p>To activate your license, enter the code above in the software’s key field and click <strong>“Online Activation.”</strong></p>
             <p>If you're offline, please send this document and your hardware ID to <a href="mailto:order@arrivalnet.se">order@arrivalnet.se</a>.</p>
@@ -142,11 +186,20 @@ def send_sales_order_confirmation(sales_order_name):
 
     pdf_file = get_pdf(html_content)
     filename = f"License_Confirmation_{sales_order.name}.pdf"
-    save_file(filename, pdf_file, "Sales Order", sales_order.name, is_private=0)
+    save_file(
+        filename,
+        pdf_file,
+        "Sales Order",
+        sales_order.name,
+        is_private=0,
+    )
 
     frappe.sendmail(
         recipients=[contact_email],
-        subject=f"Your License Keys from ArrivalNet on order {sales_order.po_no or sales_order.name}",
+        subject=(
+            f"Your License Keys from ArrivalNet on order "
+            f"{sales_order.po_no or sales_order.name}"
+        ),
         message=html_content,
         delayed=False,
         bcc=["order@arrivalnet.se"],
